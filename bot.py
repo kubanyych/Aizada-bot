@@ -12,7 +12,6 @@ BOT_TOKEN = "9056359786:AAH0O2g1R5s9f06J9A62D7frYHK3rc6IA1s"
 ADMIN_IDS = [742671142, 975190039]
 PIN_CODE = "2004"
 
-# Ваша фотография
 PHOTO_URL = "https://i.postimg.cc/MKDht3z0/IMG-20261102-WA0031.jpg"
 
 logging.basicConfig(level=logging.INFO)
@@ -146,6 +145,47 @@ async def cmd_admin(message: types.Message):
             lines.append(f"{idx}. {g['name']} ({g['username']}) — *{g['status']}*")
 
     await message.answer("\n".join(lines), parse_mode="Markdown")
+
+@dp.message(Command("remind"))
+async def cmd_remind(message: types.Message):
+    is_admin = message.from_user.id in ADMIN_IDS
+    if not is_admin:
+        args = message.text.split()
+        if len(args) < 2 or args[1] != PIN_CODE:
+            await message.answer("🔒 Введите: `/remind 2004`", parse_mode="Markdown")
+            return
+
+    # Находим всех, кто подтвердил участие
+    confirmed_guests = [uid for uid, g in guests_data.items() if g["count"] > 0]
+
+    if not confirmed_guests:
+        await message.answer("⚠️ В списке пока нет подтвержденных гостей для отправки напоминания.", parse_mode="Markdown")
+        return
+
+    remind_text = (
+        "🔔 *Напоминание о празднике!*\n\n"
+        "Дорогие друзья, совсем скоро мы встретимся! ✨\n\n"
+        "🗓 *Дата:* 23 ноября (понедельник)\n"
+        "⏰ *Время:* 19:00\n"
+        "📍 *Место:* Frunze Lounge (Москва, Днепропетровская ул., 2)\n"
+        "👗 *Дресс-код:* Свободный / Smart Casual\n\n"
+        "Очень ждем вас! По любым вопросам пишите организаторам 🤍"
+    )
+
+    sent_count = 0
+    map_btn = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📍 Открыть карту", url="https://yandex.ru/maps/org/frunze_lounge/3435885400?si=nxta9jp4th2tz8pnzrbc3j8a5w")]
+    ])
+
+    for user_id in confirmed_guests:
+        try:
+            await bot.send_message(user_id, remind_text, parse_mode="Markdown", reply_markup=map_btn)
+            sent_count += 1
+            await asyncio.sleep(0.05)  # небольшая пауза от спам-фильтра Telegram
+        except Exception as e:
+            logging.error(f"Не удалось отправить напоминание пользователю {user_id}: {e}")
+
+    await message.answer(f"✅ Напоминание успешно отправлено *{sent_count}* гостям!", parse_mode="Markdown")
 
 @dp.message(Command("reset"))
 async def cmd_reset(message: types.Message):
