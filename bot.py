@@ -9,10 +9,11 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 BOT_TOKEN = "9056359786:AAH0O2g1R5s9f06J9A62D7frYHK3rc6IA1s"
-
-# Список администраторов (оба получают уведомления и имеют доступ к командам)
 ADMIN_IDS = [742671142, 975190039]
 PIN_CODE = "2004"
+
+# Ваша фотография
+PHOTO_URL = "https://i.postimg.cc/MKDht3z0/IMG-20261102-WA0031.jpg"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -34,7 +35,7 @@ def get_main_keyboard():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    text = (
+    caption_text = (
         "✨ *Приглашение на День Рождения* ✨\n\n"
         "Дорогие друзья! В этот особенный вечер я буду безмерно рада "
         "разделить тепло, радость, уютные беседы и отличное настроение с вами! 🤍\n\n"
@@ -45,7 +46,16 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "👗 *Дресс-код:* Свободный / Smart Casual\n\n"
         "⚠️ *Пожалуйста, выберите ответ кнопкой ниже до 20 ноября!*"
     )
-    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    try:
+        await message.answer_photo(
+            photo=PHOTO_URL,
+            caption=caption_text,
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+    except Exception as e:
+        logging.error(f"Ошибка отправки фото: {e}")
+        await message.answer(caption_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 @dp.callback_query(F.data.startswith("rsvp_"))
 async def handle_rsvp_choice(call: types.CallbackQuery, state: FSMContext):
@@ -142,7 +152,6 @@ async def cmd_reset(message: types.Message):
     is_admin = message.from_user.id in ADMIN_IDS
     args = message.text.split()
     
-    # Для сброса обязателен ввод пин-кода: /reset 2004
     if not is_admin or len(args) < 2 or args[1] != PIN_CODE:
         await message.answer("🔒 Для сброса списка введите: `/reset 2004`", parse_mode="Markdown")
         return
@@ -168,4 +177,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
