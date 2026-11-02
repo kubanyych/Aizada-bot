@@ -9,14 +9,15 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 BOT_TOKEN = "9056359786:AAH0O2g1R5s9f06J9A62D7frYHK3rc6IA1s"
-ADMIN_CHAT_ID = 742671142
+
+# Список администраторов (оба получают уведомления и имеют доступ к командам)
+ADMIN_IDS = [742671142, 975190039]
 PIN_CODE = "2004"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Состояния для ожидания ввода имени
 class RSVPState(StatesGroup):
     waiting_for_name = State()
 
@@ -58,7 +59,6 @@ async def handle_rsvp_choice(call: types.CallbackQuery, state: FSMContext):
         status = "Не сможет прийти"
         count = 0
 
-    # Сохраняем временный выбор и запрашиваем имя
     await state.update_data(status=status, count=count)
     await state.set_state(RSVPState.waiting_for_name)
 
@@ -78,7 +78,6 @@ async def process_guest_name(message: types.Message, state: FSMContext):
     user = message.from_user
     username_str = f"@{user.username}" if user.username else "без юзернейма"
 
-    # Сохраняем в список
     guests_data[user.id] = {
         "name": guest_name,
         "username": username_str,
@@ -88,7 +87,6 @@ async def process_guest_name(message: types.Message, state: FSMContext):
 
     await state.clear()
 
-    # Ответ гостю
     if count > 0:
         reply_text = f"Спасибо, {guest_name}! Ваш ответ записан. Будем очень ждать вас на празднике! ✨🥂"
     else:
@@ -100,23 +98,25 @@ async def process_guest_name(message: types.Message, state: FSMContext):
         f"_(Если планы изменятся, вы можете снова отправить /start)_"
     )
 
-    # Уведомление администратору
     admin_notification = (
         f"📩 *Новый ответ на приглашение!*\n\n"
         f"👤 *Гость:* {guest_name} ({username_str})\n"
         f"📋 *Статус:* {status}"
     )
-    try:
-        await bot.send_message(ADMIN_CHAT_ID, admin_notification, parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Ошибка отправки: {e}")
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, admin_notification, parse_mode="Markdown")
+        except Exception as e:
+            logging.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    if message.from_user.id != ADMIN_CHAT_ID:
+    is_admin = message.from_user.id in ADMIN_IDS
+    if not is_admin:
         args = message.text.split()
         if len(args) < 2 or args[1] != PIN_CODE:
-            await message.answer("🔒 Введите: `/admin 2004`", parse_mode="Markdown")
+            await message.answer("🔒 Введите команду с пин-кодом: `/admin 2004`", parse_mode="Markdown")
             return
 
     total_attending = sum(g["count"] for g in guests_data.values())
@@ -137,6 +137,19 @@ async def cmd_admin(message: types.Message):
 
     await message.answer("\n".join(lines), parse_mode="Markdown")
 
+@dp.message(Command("reset"))
+async def cmd_reset(message: types.Message):
+    is_admin = message.from_user.id in ADMIN_IDS
+    args = message.text.split()
+    
+    # Для сброса обязателен ввод пин-кода: /reset 2004
+    if not is_admin or len(args) < 2 or args[1] != PIN_CODE:
+        await message.answer("🔒 Для сброса списка введите: `/reset 2004`", parse_mode="Markdown")
+        return
+
+    guests_data.clear()
+    await message.answer("🗑 *Список гостей успешно очищен!* Теперь сбор ответов начинается с нуля.", parse_mode="Markdown")
+
 async def health_check(request):
     return web.Response(text="Bot is running!")
 
@@ -155,3 +168,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
