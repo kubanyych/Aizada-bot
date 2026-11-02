@@ -4,6 +4,8 @@ import os
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 BOT_TOKEN = "9056359786:AAH0O2g1R5s9f06J9A62D7frYHK3rc6IA1s"
@@ -14,19 +16,23 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Состояния для ожидания ввода имени
+class RSVPState(StatesGroup):
+    waiting_for_name = State()
+
 guests_data = {}
 
 def get_main_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✨ С радостью приду!", callback_data="rsvp_yes_single")],
         [InlineKeyboardButton(text="🥂 Приду с парой (+1)", callback_data="rsvp_yes_plus1")],
         [InlineKeyboardButton(text="😔 К сожалению, не смогу", callback_data="rsvp_no")],
         [InlineKeyboardButton(text="📍 Frunze Lounge на Яндекс Картах", url="https://yandex.ru/maps/org/frunze_lounge/3435885400?si=nxta9jp4th2tz8pnzrbc3j8a5w")]
     ])
-    return keyboard
 
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     text = (
         "✨ *Приглашение на День Рождения* ✨\n\n"
         "Дорогие друзья! В этот особенный вечер я буду безмерно рада "
@@ -36,47 +42,74 @@ async def cmd_start(message: types.Message):
         "📍 *Место:* Frunze Lounge\n"
         "🏢 *Адрес:* Москва, Днепропетровская ул., 2\n"
         "👗 *Дресс-код:* Свободный / Smart Casual\n\n"
-        "⚠️ *Пожалуйста, подтвердите своё участие кнопкой ниже до 20 ноября!*"
+        "⚠️ *Пожалуйста, выберите ответ кнопкой ниже до 20 ноября!*"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 @dp.callback_query(F.data.startswith("rsvp_"))
-async def handle_rsvp(call: types.CallbackQuery):
-    user = call.from_user
-    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-    username_str = f"@{user.username}" if user.username else "без юзернейма"
-
+async def handle_rsvp_choice(call: types.CallbackQuery, state: FSMContext):
     if call.data == "rsvp_yes_single":
-        status_text = "Придёт (1 человек)"
-        response_msg = "Ура! Спасибо за ответ, буду очень ждать встречи! ✨🥂"
-        guests_data[user.id] = {"name": full_name, "username": username_str, "status": "Придёт", "count": 1}
+        status = "Придёт (1 чел.)"
+        count = 1
     elif call.data == "rsvp_yes_plus1":
-        status_text = "Придёт с парой (+1, всего 2 чел.)"
-        response_msg = "Замечательно! Жду вас обоих! ✨🎉"
-        guests_data[user.id] = {"name": full_name, "username": username_str, "status": "Придёт с +1", "count": 2}
+        status = "Придёт с парой (+1, всего 2 чел.)"
+        count = 2
     else:
-        status_text = "Не сможет прийти"
-        response_msg = "Очень жаль, но спасибо, что предупредили! 🤍"
-        guests_data[user.id] = {"name": full_name, "username": username_str, "status": "Отказ", "count": 0}
+        status = "Не сможет прийти"
+        count = 0
 
-    await call.message.edit_text(
-        f"{response_msg}\n\n"
-        f"📍 Frunze Lounge, 23 ноября в 19:00\n\n"
-        f"_(Если ваши планы изменятся, вы можете снова нажать /start и выбрать другой ответ)_",
+    # Сохраняем временный выбор и запрашиваем имя
+    await state.update_data(status=status, count=count)
+    await state.set_state(RSVPState.waiting_for_name)
+
+    await call.message.answer(
+        "✍️ Напишите, пожалуйста, в ответном сообщении ваши **Имя и Фамилию**, чтобы мы внесли вас в список гостей:",
         parse_mode="Markdown"
     )
+    await call.answer()
 
+@dp.message(RSVPState.waiting_for_name)
+async def process_guest_name(message: types.Message, state: FSMContext):
+    guest_name = message.text.strip()
+    user_data = await state.get_data()
+    status = user_data.get("status")
+    count = user_data.get("count", 0)
+
+    user = message.from_user
+    username_str = f"@{user.username}" if user.username else "без юзернейма"
+
+    # Сохраняем в список
+    guests_data[user.id] = {
+        "name": guest_name,
+        "username": username_str,
+        "status": status,
+        "count": count
+    }
+
+    await state.clear()
+
+    # Ответ гостю
+    if count > 0:
+        reply_text = f"Спасибо, {guest_name}! Ваш ответ записан. Будем очень ждать вас на празднике! ✨🥂"
+    else:
+        reply_text = f"Спасибо, {guest_name}, что предупредили! Жаль, что не получится быть вместе в этот вечер 🤍"
+
+    await message.answer(
+        f"{reply_text}\n\n"
+        f"📍 Frunze Lounge, 23 ноября в 19:00\n"
+        f"_(Если планы изменятся, вы можете снова отправить /start)_"
+    )
+
+    # Уведомление администратору
     admin_notification = (
         f"📩 *Новый ответ на приглашение!*\n\n"
-        f"👤 *Гость:* {full_name} ({username_str})\n"
-        f"📋 *Статус:* {status_text}"
+        f"👤 *Гость:* {guest_name} ({username_str})\n"
+        f"📋 *Статус:* {status}"
     )
     try:
         await bot.send_message(ADMIN_CHAT_ID, admin_notification, parse_mode="Markdown")
     except Exception as e:
         logging.error(f"Ошибка отправки: {e}")
-
-    await call.answer()
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
@@ -87,7 +120,7 @@ async def cmd_admin(message: types.Message):
             return
 
     total_attending = sum(g["count"] for g in guests_data.values())
-    total_declined = sum(1 for g in guests_data.values() if g["status"] == "Отказ")
+    total_declined = sum(1 for g in guests_data.values() if "Не сможет" in g["status"])
 
     lines = [
         "📊 *Список ответов гостей:*\n",
