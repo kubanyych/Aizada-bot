@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -78,4 +80,45 @@ async def handle_rsvp(call: types.CallbackQuery):
 
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-  
+    if message.from_user.id != ADMIN_CHAT_ID:
+        args = message.text.split()
+        if len(args) < 2 or args[1] != PIN_CODE:
+            await message.answer("🔒 Введите: `/admin 2004`", parse_mode="Markdown")
+            return
+
+    total_attending = sum(g["count"] for g in guests_data.values())
+    total_declined = sum(1 for g in guests_data.values() if g["status"] == "Отказ")
+
+    lines = [
+        "📊 *Список ответов гостей:*\n",
+        f"✅ Будут: *{total_attending} чел.*",
+        f"❌ Не смогут: *{total_declined} чел.*\n",
+        "👥 *Детализация:*"
+    ]
+
+    if not guests_data:
+        lines.append("Пока никто не ответил.")
+    else:
+        for idx, g in enumerate(guests_data.values(), 1):
+            lines.append(f"{idx}. {g['name']} ({g['username']}) — *{g['status']}*")
+
+    await message.answer("\n".join(lines), parse_mode="Markdown")
+
+async def health_check(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+async def main():
+    await start_web_server()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
